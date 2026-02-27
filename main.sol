@@ -848,3 +848,88 @@ contract Therminos {
             if (b[n - 1] - b[i] > w) break;
             if (p[i] < minP) {
                 minP = p[i];
+                minBlock = b[i];
+            }
+        }
+        return (minP == type(uint256).max ? 0 : minP, minBlock);
+    }
+
+    function getMaxPriceInWindow(bytes32 symbolHash) external view returns (uint256 priceE8, uint256 atBlock) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256[] storage p = s.priceHistoryE8;
+        uint256[] storage b = s.blockHistory;
+        uint256 w = s.windowBlocks;
+        uint256 n = p.length;
+        if (n == 0) return (0, 0);
+        uint256 maxP;
+        uint256 maxBlock;
+        for (uint256 i = n; i > 0; ) {
+            unchecked { --i; }
+            if (b[n - 1] - b[i] > w) break;
+            if (p[i] > maxP) {
+                maxP = p[i];
+                maxBlock = b[i];
+            }
+        }
+        return (maxP, maxBlock);
+    }
+
+    function getPriceChangeBps(bytes32 symbolHash, uint256 fromBlock, uint256 toBlock) external view returns (
+        int256 changeBps,
+        bool fromFound,
+        bool toFound
+    ) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        (uint256 pFrom, bool fromF) = getPriceAtBlock(symbolHash, fromBlock);
+        (uint256 pTo, bool toF) = getPriceAtBlock(symbolHash, toBlock);
+        fromFound = fromF;
+        toFound = toF;
+        if (!fromFound || !toFound || pFrom == 0 || pTo == 0) return (0, fromFound, toFound);
+        if (pTo >= pFrom) {
+            changeBps = int256((uint256(pTo - pFrom) * THRM_BPS_BASE) / pFrom);
+        } else {
+            changeBps = -int256((uint256(pFrom - pTo) * THRM_BPS_BASE) / pFrom);
+        }
+    }
+
+    function getAveragePriceInWindow(bytes32 symbolHash) external view returns (uint256 avgE8, uint256 sampleCount) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256[] storage p = s.priceHistoryE8;
+        uint256[] storage b = s.blockHistory;
+        uint256 w = s.windowBlocks;
+        uint256 n = p.length;
+        if (n == 0) return (0, 0);
+        uint256 sum;
+        uint256 count;
+        for (uint256 i = n; i > 0; ) {
+            unchecked { --i; }
+            if (b[n - 1] - b[i] > w) break;
+            sum += p[i];
+            count++;
+        }
+        if (count == 0) return (0, 0);
+        return (sum / count, count);
+    }
+
+    function getMedianBand() external view returns (uint8) {
+        if (registeredSymbols.length == 0) revert THRM_NoThermometers();
+        uint256[] memory bandCounts = new uint256[](5);
+        for (uint256 i; i < registeredSymbols.length; ) {
+            uint8 b = thermometers[registeredSymbols[i]].currentBand;
+            if (b <= 4) bandCounts[b]++;
+            unchecked { ++i; }
+        }
+        uint256 half = registeredSymbols.length / 2;
+        uint256 acc;
+        for (uint8 j; j <= 4; ) {
+            acc += bandCounts[j];
+            if (acc > half) return j;
+            unchecked { ++j; }
+        }
+        return 4;
+    }
+
+    function getHottestSymbol() external view returns (bytes32 symbolHash, uint8 band, uint256 volatilityE8) {
+        if (registeredSymbols.length == 0) revert THRM_NoThermometers();
