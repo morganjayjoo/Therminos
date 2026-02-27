@@ -168,3 +168,88 @@ contract Therminos {
         _reentrancyFlag = 1;
         _;
         _reentrancyFlag = 0;
+    }
+
+    constructor() {
+        owner = msg.sender;
+        treasury = address(0xd4F8b2E6a0C5e9D1f7A3c8B6E4d2F0a9C1e5D7);
+        guardian = address(0x7E1a9C4d2F6b0A8e3D5c1B9f7E2a4D0c6F8b3);
+        updater = address(0x2A6c0E4f8B1d3D9a7C5e2F0b6A4c8E1d3F7a9);
+        deployBlock = block.number;
+        genesisHash = keccak256(abi.encodePacked("Therminos", block.chainid, block.prevrandao, THRM_DOMAIN_SALT));
+        coldBps = 500;
+        mildBps = 1500;
+        warmBps = 3500;
+        hotBps = 7000;
+        maxHistoryLength = 168;
+        reportFeeWei = 0;
+    }
+
+    function setThresholds(
+        uint256 _coldBps,
+        uint256 _mildBps,
+        uint256 _warmBps,
+        uint256 _hotBps
+    ) external onlyOwner {
+        if (_coldBps >= _mildBps || _mildBps >= _warmBps || _warmBps >= _hotBps || _hotBps > THRM_BPS_BASE) revert THRM_InvalidThresholdOrder();
+        coldBps = _coldBps;
+        mildBps = _mildBps;
+        warmBps = _warmBps;
+        hotBps = _hotBps;
+        emit ThresholdsUpdated(_coldBps, _mildBps, _warmBps, _hotBps, block.number);
+    }
+
+    function setUpdater(address newUpdater) external onlyOwner {
+        if (newUpdater == address(0)) revert THRM_ZeroAddress();
+        address prev = updater;
+        updater = newUpdater;
+        emit UpdaterSet(prev, newUpdater, block.number);
+    }
+
+    function setGuardian(address newGuardian) external onlyOwner {
+        if (newGuardian == address(0)) revert THRM_ZeroAddress();
+        address prev = guardian;
+        guardian = newGuardian;
+        emit GuardianSet(prev, newGuardian, block.number);
+    }
+
+    function setPlatformPaused(bool paused) external onlyGuardian {
+        platformPaused = paused;
+        emit PlatformPauseToggled(paused, block.number);
+    }
+
+    function setReportFeeWei(uint256 feeWei) external onlyOwner {
+        if (feeWei > 1e15) revert THRM_InvalidFeeWei();
+        uint256 prev = reportFeeWei;
+        reportFeeWei = feeWei;
+        emit FeeWeiUpdated(prev, feeWei, block.number);
+    }
+
+    function setMaxHistoryLength(uint256 len) external onlyOwner {
+        if (len > THRM_MAX_HISTORY_LEN) len = THRM_MAX_HISTORY_LEN;
+        uint256 prev = maxHistoryLength;
+        maxHistoryLength = len;
+        emit MaxHistoryLengthUpdated(prev, len, block.number);
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert THRM_ZeroAddress();
+        address prev = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(prev, newOwner);
+    }
+
+    function registerThermometer(bytes32 symbolHash, uint256 windowBlocks) external onlyOwner whenNotPaused {
+        if (thermometers[symbolHash].registeredAtBlock != 0) revert THRM_SymbolAlreadyRegistered();
+        if (thermometerCount >= THRM_MAX_THERMOMETERS) revert THRM_MaxThermometersReached();
+        if (windowBlocks < THRM_MIN_WINDOW_BLOCKS) revert THRM_WindowTooShort();
+        if (windowBlocks > THRM_MAX_WINDOW_BLOCKS) revert THRM_WindowTooLong();
+
+        thermometers[symbolHash] = ThermoSlot({
+            symbolHash: symbolHash,
+            windowBlocks: windowBlocks,
+            cooldownBlocks: 0,
+            lastReportBlock: 0,
+            priceHistoryE8: new uint256[](0),
+            blockHistory: new uint256[](0),
+            currentBand: 0,
