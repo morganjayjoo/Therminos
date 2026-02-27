@@ -593,3 +593,88 @@ contract Therminos {
         return (0, false);
     }
 
+    function countThermometersInBand(uint8 band) external view returns (uint256) {
+        if (band > THRM_BAND_CRITICAL) revert THRM_InvalidBand();
+        uint256 count;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            if (thermometers[registeredSymbols[i]].currentBand == band) count++;
+            unchecked { ++i; }
+        }
+        return count;
+    }
+
+    function getSymbolHashesInBand(uint8 band) external view returns (bytes32[] memory) {
+        if (band > THRM_BAND_CRITICAL) revert THRM_InvalidBand();
+        uint256 n = registeredSymbols.length;
+        uint256 count;
+        for (uint256 i; i < n; ) {
+            if (thermometers[registeredSymbols[i]].currentBand == band) count++;
+            unchecked { ++i; }
+        }
+        bytes32[] memory out = new bytes32[](count);
+        count = 0;
+        for (uint256 i; i < n; ) {
+            if (thermometers[registeredSymbols[i]].currentBand == band) {
+                out[count] = registeredSymbols[i];
+                count++;
+            }
+            unchecked { ++i; }
+        }
+        return out;
+    }
+
+    function getVolatilityBps(bytes32 symbolHash) external view returns (uint256) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return (thermometers[symbolHash].currentVolatilityE8 * THRM_BPS_BASE) / 1e8;
+    }
+
+    function getNextReportBlock(bytes32 symbolHash) external view returns (uint256) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        if (s.cooldownBlocks == 0) return block.number;
+        uint256 next = s.lastReportBlock + s.cooldownBlocks;
+        if (block.number >= next) return block.number;
+        return next;
+    }
+
+    function canReport(bytes32 symbolHash) external view returns (bool) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0 || s.halted) return false;
+        if (s.cooldownBlocks == 0) return true;
+        return block.number >= s.lastReportBlock + s.cooldownBlocks;
+    }
+
+    function getContractBalance() external view returns (uint256) {
+        return address(this).balance;
+    }
+
+    function getGlobalReportSequence() external view returns (uint256) {
+        return globalReportSequence;
+    }
+
+    function bandLabel(uint8 band) external pure returns (string memory) {
+        if (band == THRM_BAND_COLD) return "cold";
+        if (band == THRM_BAND_MILD) return "mild";
+        if (band == THRM_BAND_WARM) return "warm";
+        if (band == THRM_BAND_HOT) return "hot";
+        if (band == THRM_BAND_CRITICAL) return "critical";
+        return "unknown";
+    }
+
+    function estimateVolatilityE8(bytes32 symbolHash) external view returns (uint256) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return _computeVolatilityE8(s);
+    }
+
+    function getSlotByIndex(uint256 index) external view returns (
+        bytes32 symbolHash,
+        uint8 currentBand,
+        uint256 currentPriceE8,
+        uint256 currentVolatilityE8,
+        bool halted
+    ) {
+        if (index >= registeredSymbols.length) revert THRM_InvalidIndex();
+        symbolHash = registeredSymbols[index];
+        ThermoSlot storage s = thermometers[symbolHash];
+        return (
