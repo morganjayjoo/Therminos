@@ -508,3 +508,88 @@ contract Therminos {
             volatilitiesE8[i] = s.currentVolatilityE8;
             pricesE8[i] = s.currentPriceE8;
             unchecked { ++i; }
+        }
+    }
+
+    function getVolatilityE8(bytes32 symbolHash) external view returns (uint256) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return thermometers[symbolHash].currentVolatilityE8;
+    }
+
+    function getCurrentBand(bytes32 symbolHash) external view returns (uint8) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return thermometers[symbolHash].currentBand;
+    }
+
+    function getCurrentPriceE8(bytes32 symbolHash) external view returns (uint256) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return thermometers[symbolHash].currentPriceE8;
+    }
+
+    function isHalted(bytes32 symbolHash) external view returns (bool) {
+        return thermometers[symbolHash].halted;
+    }
+
+    function getThresholds() external view returns (uint256 _coldBps, uint256 _mildBps, uint256 _warmBps, uint256 _hotBps) {
+        return (coldBps, mildBps, warmBps, hotBps);
+    }
+
+    function computeBandForVolatilityBps(uint256 volatilityBps) external view returns (uint8) {
+        return _bandFromVolatilityBps(volatilityBps);
+    }
+
+    function getGenesisHash() external view returns (bytes32) {
+        return genesisHash;
+    }
+
+    function getDeployBlock() external view returns (uint256) {
+        return deployBlock;
+    }
+
+    receive() external payable {}
+
+    function _trimHistoryIfNeeded(bytes32 symbolHash) internal {
+        ThermoSlot storage s = thermometers[symbolHash];
+        uint256 len = s.priceHistoryE8.length;
+        if (len <= maxHistoryLength) return;
+        uint256 remove = len - maxHistoryLength;
+        for (uint256 i; i < remove; ) {
+            for (uint256 j; j < len - 1; ) {
+                s.priceHistoryE8[j] = s.priceHistoryE8[j + 1];
+                s.blockHistory[j] = s.blockHistory[j + 1];
+                unchecked { ++j; }
+            }
+            s.priceHistoryE8.pop();
+            s.blockHistory.pop();
+            len = s.priceHistoryE8.length;
+            unchecked { ++i; }
+        }
+    }
+
+    function trimHistory(bytes32 symbolHash) external onlyOwner {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        _trimHistoryIfNeeded(symbolHash);
+    }
+
+    function getLatestPricePoint(bytes32 symbolHash) external view returns (uint256 priceE8, uint256 blockNum) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256 len = s.priceHistoryE8.length;
+        if (len == 0) return (0, 0);
+        return (s.priceHistoryE8[len - 1], s.blockHistory[len - 1]);
+    }
+
+    function getPriceAtBlock(bytes32 symbolHash, uint256 blockNum) external view returns (uint256 priceE8, bool found) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256[] storage blocks = s.blockHistory;
+        uint256[] storage prices = s.priceHistoryE8;
+        for (uint256 i = blocks.length; i > 0; ) {
+            unchecked { --i; }
+            if (blocks[i] <= blockNum) {
+                return (prices[i], true);
+            }
+        }
+        return (0, false);
+    }
+
