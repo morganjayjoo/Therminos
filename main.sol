@@ -1188,3 +1188,88 @@ contract Therminos {
         uint256 len = blks.length;
         if (n == 0 || n > len) n = len;
         uint256 start = len - n;
+        bands = new uint8[](n);
+        blocks = new uint256[](n);
+        for (uint256 i; i < n; ) {
+            bands[i] = bnds[start + i];
+            blocks[i] = blks[start + i];
+            unchecked { ++i; }
+        }
+    }
+
+    function getVolatilityAtReportIndex(bytes32 symbolHash, uint256 reportIndex) external view returns (uint256 volE8) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256 len = s.priceHistoryE8.length;
+        if (reportIndex >= len) revert THRM_InvalidIndex();
+        uint256 w = s.windowBlocks;
+        uint256[] storage p = s.priceHistoryE8;
+        uint256[] storage b = s.blockHistory;
+        uint256 sum;
+        uint256 count;
+        for (uint256 i = reportIndex; i > 0; ) {
+            unchecked { --i; }
+            if (b[reportIndex] - b[i] > w) break;
+            uint256 pCur = p[i];
+            uint256 pPrev = i == 0 ? pCur : p[i - 1];
+            if (pPrev != 0 && i > 0) {
+                uint256 ch = (pCur > pPrev) ? ((pCur - pPrev) * THRM_BPS_BASE) / pPrev : ((pPrev - pCur) * THRM_BPS_BASE) / pPrev;
+                sum += ch;
+                count++;
+            }
+        }
+        if (count == 0) return 0;
+        return (sum * 1e8) / (count * THRM_BPS_BASE);
+    }
+
+    function getSymbolHashAtIndex(uint256 index) external view returns (bytes32) {
+        if (index >= registeredSymbols.length) revert THRM_InvalidIndex();
+        return registeredSymbols[index];
+    }
+
+    function getThermometerCount() external view returns (uint256) {
+        return thermometerCount;
+    }
+
+    function getOwner() external view returns (address) {
+        return owner;
+    }
+
+    function supportsSymbol(bytes32 symbolHash) external view returns (bool) {
+        return thermometers[symbolHash].registeredAtBlock != 0;
+    }
+
+    function getPriceHistoryLength(bytes32 symbolHash) external view returns (uint256) {
+        return thermometers[symbolHash].priceHistoryE8.length;
+    }
+
+    function getBandAtBlock(bytes32 symbolHash, uint256 blockNum) external view returns (uint8 band, bool found) {
+        uint256[] storage blks = _bandHistoryBlocks[symbolHash];
+        uint8[] storage bnds = _bandHistoryValues[symbolHash];
+        for (uint256 i = blks.length; i > 0; ) {
+            unchecked { --i; }
+            if (blks[i] <= blockNum) {
+                return (bnds[i], true);
+            }
+        }
+        return (0, false);
+    }
+
+    function getCumulativeBandTime(bytes32 symbolHash, uint8 band) external view returns (uint256 blocksInBand) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        if (band > THRM_BAND_CRITICAL) revert THRM_InvalidBand();
+        uint256[] storage blks = _bandHistoryBlocks[symbolHash];
+        uint8[] storage bnds = _bandHistoryValues[symbolHash];
+        for (uint256 i; i < blks.length; ) {
+            if (bnds[i] == band) {
+                if (i + 1 < blks.length) {
+                    blocksInBand += blks[i + 1] - blks[i];
+                } else {
+                    blocksInBand += block.number - blks[i];
+                }
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function getTreasuryBalance() external view returns (uint256) {
