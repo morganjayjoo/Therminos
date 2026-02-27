@@ -83,3 +83,88 @@ contract Therminos {
     error THRM_InsufficientPayment();
     error THRM_InvalidIndex();
     error THRM_NoThermometers();
+    error THRM_SameValue();
+    error THRM_InvalidFeeWei();
+
+    uint256 public constant THRM_BPS_BASE = 10000;
+    uint256 public constant THRM_BAND_COLD = 0;
+    uint256 public constant THRM_BAND_MILD = 1;
+    uint256 public constant THRM_BAND_WARM = 2;
+    uint256 public constant THRM_BAND_HOT = 3;
+    uint256 public constant THRM_BAND_CRITICAL = 4;
+    uint256 public constant THRM_MAX_THERMOMETERS = 96;
+    uint256 public constant THRM_MIN_WINDOW_BLOCKS = 12;
+    uint256 public constant THRM_MAX_WINDOW_BLOCKS = 40320;
+    uint256 public constant THRM_MAX_HISTORY_LEN = 720;
+    uint256 public constant THRM_MAX_BATCH_REPORT = 32;
+    uint256 public constant THRM_DOMAIN_SALT = 0x5F2b8E1c4A7d0D3f6B9a2C5e8F1b4D7c0A3e6;
+    bytes32 public constant THRM_GENESIS_DOMAIN = keccak256("Therminos.Heat.v2");
+
+    address public owner;
+    address public immutable treasury;
+    address public guardian;
+    address public updater;
+    uint256 public immutable deployBlock;
+    bytes32 public immutable genesisHash;
+
+    uint256 public thermometerCount;
+    uint256 public reportFeeWei;
+    uint256 public maxHistoryLength;
+    bool public platformPaused;
+
+    uint256 public coldBps;
+    uint256 public mildBps;
+    uint256 public warmBps;
+    uint256 public hotBps;
+
+    struct PricePoint {
+        uint256 priceE8;
+        uint256 blockNumber;
+    }
+
+    struct ThermoSlot {
+        bytes32 symbolHash;
+        uint256 windowBlocks;
+        uint256 cooldownBlocks;
+        uint256 lastReportBlock;
+        uint256[] priceHistoryE8;
+        uint256[] blockHistory;
+        uint8 currentBand;
+        uint256 currentVolatilityE8;
+        uint256 currentPriceE8;
+        bool halted;
+        uint256 registeredAtBlock;
+    }
+
+    mapping(bytes32 => ThermoSlot) public thermometers;
+    mapping(bytes32 => uint256) public symbolToIndex;
+    bytes32[] public registeredSymbols;
+    mapping(bytes32 => uint256[]) private _bandHistoryBlocks;
+    mapping(bytes32 => uint8[]) private _bandHistoryValues;
+    uint256 public globalReportSequence;
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert THRM_NotOwner();
+        _;
+    }
+
+    modifier onlyUpdater() {
+        if (msg.sender != updater && msg.sender != owner) revert THRM_NotUpdater();
+        _;
+    }
+
+    modifier onlyGuardian() {
+        if (msg.sender != guardian && msg.sender != owner) revert THRM_NotGuardian();
+        _;
+    }
+
+    modifier whenNotPaused() {
+        if (platformPaused) revert THRM_PlatformPaused();
+        _;
+    }
+
+    modifier nonReentrant() {
+        if (_reentrancyFlag != 0) revert THRM_ReentrantCall();
+        _reentrancyFlag = 1;
+        _;
+        _reentrancyFlag = 0;
