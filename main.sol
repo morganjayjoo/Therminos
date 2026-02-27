@@ -1018,3 +1018,88 @@ contract Therminos {
         }
         uint256 sum;
         uint256 count;
+        for (uint256 i = oldLen - 1; i > 0; ) {
+            if (oldBlocks[oldLen - 1] - oldBlocks[i - 1] > s.windowBlocks) break;
+            uint256 pCur = oldPrices[i];
+            uint256 pPrev = oldPrices[i - 1];
+            if (pPrev == 0) { unchecked { --i; } continue; }
+            uint256 ch = (pCur > pPrev) ? ((pCur - pPrev) * THRM_BPS_BASE) / pPrev : ((pPrev - pCur) * THRM_BPS_BASE) / pPrev;
+            sum += ch;
+            count++;
+            unchecked { --i; }
+        }
+        uint256 oldVolBps = count == 0 ? 0 : sum / count;
+        uint256 recentVolBps = (recentVol * THRM_BPS_BASE) / 1e8;
+        if (recentVolBps >= oldVolBps) return int256(uint256((recentVolBps - oldVolBps) * 1e8 / THRM_BPS_BASE));
+        return -int256(uint256((oldVolBps - recentVolBps) * 1e8 / THRM_BPS_BASE));
+    }
+
+    function getBandDistribution() external view returns (
+        uint256 cold,
+        uint256 mild,
+        uint256 warm,
+        uint256 hot,
+        uint256 critical
+    ) {
+        for (uint256 i; i < registeredSymbols.length; ) {
+            uint8 b = thermometers[registeredSymbols[i]].currentBand;
+            if (b == 0) cold++;
+            else if (b == 1) mild++;
+            else if (b == 2) warm++;
+            else if (b == 3) hot++;
+            else critical++;
+            unchecked { ++i; }
+        }
+    }
+
+    function getWeightedAverageBand() external view returns (uint256 weightedE4) {
+        if (registeredSymbols.length == 0) revert THRM_NoThermometers();
+        uint256 sum;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            sum += uint256(thermometers[registeredSymbols[i]].currentBand) * 1e4;
+            unchecked { ++i; }
+        }
+        return sum / registeredSymbols.length;
+    }
+
+    function getAlertsSummary() external view returns (
+        uint256 hotOrCriticalCount,
+        uint256 haltedCount,
+        uint256 staleCount,
+        uint256 blocksSinceLastReport
+    ) {
+        uint256 lastBlock;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            ThermoSlot storage s = thermometers[registeredSymbols[i]];
+            if (s.currentBand >= THRM_BAND_HOT) hotOrCriticalCount++;
+            if (s.halted) haltedCount++;
+            if (s.lastReportBlock > lastBlock) lastBlock = s.lastReportBlock;
+            unchecked { ++i; }
+        }
+        blocksSinceLastReport = lastBlock == 0 ? 0 : block.number - lastBlock;
+        if (blocksSinceLastReport > 100) staleCount = 1;
+    }
+
+    function getFullSlot(bytes32 symbolHash) external view returns (
+        bytes32 symHash,
+        uint256 windowBlocks,
+        uint256 cooldownBlocks,
+        uint256 lastReportBlock,
+        uint256 historyLen,
+        uint8 currentBand,
+        uint256 currentVolatilityE8,
+        uint256 currentPriceE8,
+        bool halted,
+        uint256 registeredAtBlock
+    ) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return (
+            s.symbolHash,
+            s.windowBlocks,
+            s.cooldownBlocks,
+            s.lastReportBlock,
+            s.priceHistoryE8.length,
+            s.currentBand,
+            s.currentVolatilityE8,
+            s.currentPriceE8,
