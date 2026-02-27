@@ -253,3 +253,173 @@ contract Therminos {
             priceHistoryE8: new uint256[](0),
             blockHistory: new uint256[](0),
             currentBand: 0,
+            currentVolatilityE8: 0,
+            currentPriceE8: 0,
+            halted: false,
+            registeredAtBlock: block.number
+        });
+        thermometerCount++;
+        registeredSymbols.push(symbolHash);
+        symbolToIndex[symbolHash] = registeredSymbols.length;
+        emit ThermometerRegistered(symbolHash, windowBlocks, block.number);
+    }
+
+    function removeThermometer(bytes32 symbolHash) external onlyOwner {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        delete thermometers[symbolHash];
+        thermometerCount--;
+        emit ThermometerRemoved(symbolHash, block.number);
+    }
+
+    function setCooldown(bytes32 symbolHash, uint256 cooldownBlocks) external onlyOwner {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        thermometers[symbolHash].cooldownBlocks = cooldownBlocks;
+        emit CooldownConfigured(symbolHash, cooldownBlocks, block.number);
+    }
+
+    function emergencyHalt(bytes32 symbolHash) external onlyGuardian {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        thermometers[symbolHash].halted = true;
+        emit EmergencyHalt(symbolHash, block.number);
+    }
+
+    function emergencyLift(bytes32 symbolHash) external onlyGuardian {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        thermometers[symbolHash].halted = false;
+        emit EmergencyLift(symbolHash, block.number);
+    }
+
+    function _computeVolatilityE8(ThermoSlot storage slot) internal view returns (uint256 volE8) {
+        uint256[] storage prices = slot.priceHistoryE8;
+        uint256[] storage blocks = slot.blockHistory;
+        uint256 w = slot.windowBlocks;
+        if (prices.length < 2) return 0;
+        uint256 n = prices.length;
+        uint256 sum;
+        uint256 count;
+        for (uint256 i = n - 1; i > 0; ) {
+            if (blocks[n - 1] - blocks[i - 1] > w) break;
+            uint256 pCur = prices[i];
+            uint256 pPrev = prices[i - 1];
+            if (pPrev == 0) {
+                unchecked { --i; }
+                continue;
+            }
+            uint256 changeBps = (pCur > pPrev)
+                ? ((pCur - pPrev) * THRM_BPS_BASE) / pPrev
+                : ((pPrev - pCur) * THRM_BPS_BASE) / pPrev;
+            sum += changeBps;
+            count++;
+            unchecked { --i; }
+        }
+        if (count == 0) return 0;
+        return (sum * 1e8) / (count * THRM_BPS_BASE);
+    }
+
+    function _bandFromVolatilityBps(uint256 volatilityBps) internal view returns (uint8) {
+        if (volatilityBps <= coldBps) return uint8(THRM_BAND_COLD);
+        if (volatilityBps <= mildBps) return uint8(THRM_BAND_MILD);
+        if (volatilityBps <= warmBps) return uint8(THRM_BAND_WARM);
+        if (volatilityBps <= hotBps) return uint8(THRM_BAND_HOT);
+        return uint8(THRM_BAND_CRITICAL);
+    }
+
+    function reportPrice(bytes32 symbolHash, uint256 priceE8) external payable onlyUpdater whenNotPaused nonReentrant {
+        if (msg.value < reportFeeWei) revert THRM_InsufficientPayment();
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        if (thermometers[symbolHash].halted) revert THRM_SymbolHalted();
+        if (priceE8 == 0) revert THRM_ZeroPrice();
+
+        ThermoSlot storage slot = thermometers[symbolHash];
+        if (slot.cooldownBlocks > 0 && block.number < slot.lastReportBlock + slot.cooldownBlocks) revert THRM_CooldownActive();
+
+        uint256[] storage prices = slot.priceHistoryE8;
+        uint256[] storage blocks = slot.blockHistory;
+        if (prices.length >= maxHistoryLength) revert THRM_HistoryFull();
+
+        uint8 prevBand = slot.currentBand;
+        slot.currentPriceE8 = priceE8;
+        slot.lastReportBlock = block.number;
+        prices.push(priceE8);
+        blocks.push(block.number);
+
+        slot.currentVolatilityE8 = _computeVolatilityE8(slot);
+        uint256 volBps = (slot.currentVolatilityE8 * THRM_BPS_BASE) / 1e8;
+        uint8 newBand = _bandFromVolatilityBps(volBps);
+        slot.currentBand = newBand;
+
+        _bandHistoryBlocks[symbolHash].push(block.number);
+        _bandHistoryValues[symbolHash].push(newBand);
+
+        globalReportSequence++;
+
+        emit PriceReported(symbolHash, priceE8, msg.sender, block.number);
+        emit SnapshotAppended(symbolHash, priceE8, block.number);
+        emit HeatLevelChanged(symbolHash, prevBand, newBand, priceE8, slot.currentVolatilityE8, block.number);
+        if (prevBand != newBand) emit BandCrossed(symbolHash, prevBand, newBand, block.number);
+        if (newBand >= THRM_BAND_HOT) emit VolatilitySpike(symbolHash, slot.currentVolatilityE8, hotBps * 1e8 / THRM_BPS_BASE, block.number);
+
+        if (reportFeeWei > 0 && address(this).balance >= reportFeeWei) {
+            (bool ok,) = treasury.call{value: reportFeeWei}("");
+            if (!ok) revert THRM_TransferFailed();
+            emit TreasurySweep(treasury, reportFeeWei, block.number);
+        }
+    }
+
+    function batchReportPrices(
+        bytes32[] calldata symbolHashes,
+        uint256[] calldata pricesE8
+    ) external payable onlyUpdater whenNotPaused nonReentrant {
+        uint256 n = symbolHashes.length;
+        if (n != pricesE8.length) revert THRM_ArrayLengthMismatch();
+        if (n == 0 || n > THRM_MAX_BATCH_REPORT) revert THRM_BatchTooLarge();
+        if (msg.value < reportFeeWei * n) revert THRM_InsufficientPayment();
+
+        for (uint256 i; i < n; ) {
+            bytes32 sh = symbolHashes[i];
+            uint256 pe = pricesE8[i];
+            if (thermometers[sh].registeredAtBlock != 0 && !thermometers[sh].halted && pe != 0) {
+                ThermoSlot storage slot = thermometers[sh];
+                if (slot.cooldownBlocks == 0 || block.number >= slot.lastReportBlock + slot.cooldownBlocks) {
+                    if (slot.priceHistoryE8.length < maxHistoryLength) {
+                        uint8 prevBand = slot.currentBand;
+                        slot.currentPriceE8 = pe;
+                        slot.lastReportBlock = block.number;
+                        slot.priceHistoryE8.push(pe);
+                        slot.blockHistory.push(block.number);
+                        slot.currentVolatilityE8 = _computeVolatilityE8(slot);
+                        uint256 volBps = (slot.currentVolatilityE8 * THRM_BPS_BASE) / 1e8;
+                        uint8 newBand = _bandFromVolatilityBps(volBps);
+                        slot.currentBand = newBand;
+                        _bandHistoryBlocks[sh].push(block.number);
+                        _bandHistoryValues[sh].push(newBand);
+                        emit PriceReported(sh, pe, msg.sender, block.number);
+                        emit HeatLevelChanged(sh, prevBand, newBand, pe, slot.currentVolatilityE8, block.number);
+                        if (prevBand != newBand) emit BandCrossed(sh, prevBand, newBand, block.number);
+                    }
+                }
+            }
+            unchecked { ++i; }
+        }
+        globalReportSequence++;
+        emit BatchPricesReported(symbolHashes, pricesE8, msg.sender, block.number);
+
+        uint256 totalFee = reportFeeWei * n;
+        if (totalFee > 0 && address(this).balance >= totalFee) {
+            (bool ok,) = treasury.call{value: totalFee}("");
+            if (!ok) revert THRM_TransferFailed();
+            emit TreasurySweep(treasury, totalFee, block.number);
+        }
+    }
+
+    function sweepTreasury(uint256 amountWei) external onlyOwner nonReentrant {
+        if (amountWei == 0) revert THRM_ZeroAmount();
+        uint256 bal = address(this).balance;
+        if (amountWei > bal) amountWei = bal;
+        (bool ok,) = treasury.call{value: amountWei}("");
+        if (!ok) revert THRM_TransferFailed();
+        emit TreasurySweep(treasury, amountWei, block.number);
+    }
+
+    function getThermometer(bytes32 symbolHash) external view returns (
+        uint256 windowBlocks,
