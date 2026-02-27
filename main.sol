@@ -763,3 +763,88 @@ contract Therminos {
         }
     }
 
+    function multiGetVolatilityE8(bytes32[] calldata symbolHashes) external view returns (uint256[] memory vols) {
+        vols = new uint256[](symbolHashes.length);
+        for (uint256 i; i < symbolHashes.length; ) {
+            if (thermometers[symbolHashes[i]].registeredAtBlock != 0) {
+                vols[i] = thermometers[symbolHashes[i]].currentVolatilityE8;
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function multiGetPriceE8(bytes32[] calldata symbolHashes) external view returns (uint256[] memory prices) {
+        prices = new uint256[](symbolHashes.length);
+        for (uint256 i; i < symbolHashes.length; ) {
+            if (thermometers[symbolHashes[i]].registeredAtBlock != 0) {
+                prices[i] = thermometers[symbolHashes[i]].currentPriceE8;
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function multiIsHalted(bytes32[] calldata symbolHashes) external view returns (bool[] memory halted) {
+        halted = new bool[](symbolHashes.length);
+        for (uint256 i; i < symbolHashes.length; ) {
+            halted[i] = thermometers[symbolHashes[i]].halted;
+            unchecked { ++i; }
+        }
+    }
+
+    function getBandStats() external view returns (
+        uint256 coldCount,
+        uint256 mildCount,
+        uint256 warmCount,
+        uint256 hotCount,
+        uint256 criticalCount
+    ) {
+        for (uint256 i; i < registeredSymbols.length; ) {
+            uint8 b = thermometers[registeredSymbols[i]].currentBand;
+            if (b == THRM_BAND_COLD) coldCount++;
+            else if (b == THRM_BAND_MILD) mildCount++;
+            else if (b == THRM_BAND_WARM) warmCount++;
+            else if (b == THRM_BAND_HOT) hotCount++;
+            else if (b == THRM_BAND_CRITICAL) criticalCount++;
+            unchecked { ++i; }
+        }
+    }
+
+    function getDomainSalt() external pure returns (uint256) {
+        return THRM_DOMAIN_SALT;
+    }
+
+    function getMaxThermometers() external pure returns (uint256) {
+        return THRM_MAX_THERMOMETERS;
+    }
+
+    function getMinWindowBlocks() external pure returns (uint256) {
+        return THRM_MIN_WINDOW_BLOCKS;
+    }
+
+    function getMaxWindowBlocks() external pure returns (uint256) {
+        return THRM_MAX_WINDOW_BLOCKS;
+    }
+
+    function getMaxBatchReport() external pure returns (uint256) {
+        return THRM_MAX_BATCH_REPORT;
+    }
+
+    function getBpsBase() external pure returns (uint256) {
+        return THRM_BPS_BASE;
+    }
+
+    function getMinPriceInWindow(bytes32 symbolHash) external view returns (uint256 priceE8, uint256 atBlock) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256[] storage p = s.priceHistoryE8;
+        uint256[] storage b = s.blockHistory;
+        uint256 w = s.windowBlocks;
+        uint256 n = p.length;
+        if (n == 0) return (0, 0);
+        uint256 minP = type(uint256).max;
+        uint256 minBlock;
+        for (uint256 i = n; i > 0; ) {
+            unchecked { --i; }
+            if (b[n - 1] - b[i] > w) break;
+            if (p[i] < minP) {
+                minP = p[i];
