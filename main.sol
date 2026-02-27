@@ -423,3 +423,88 @@ contract Therminos {
 
     function getThermometer(bytes32 symbolHash) external view returns (
         uint256 windowBlocks,
+        uint256 cooldownBlocks,
+        uint256 lastReportBlock,
+        uint8 currentBand,
+        uint256 currentVolatilityE8,
+        uint256 currentPriceE8,
+        bool halted,
+        uint256 registeredAtBlock,
+        uint256 historyLength
+    ) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return (
+            s.windowBlocks,
+            s.cooldownBlocks,
+            s.lastReportBlock,
+            s.currentBand,
+            s.currentVolatilityE8,
+            s.currentPriceE8,
+            s.halted,
+            s.registeredAtBlock,
+            s.priceHistoryE8.length
+        );
+    }
+
+    function getPriceHistory(bytes32 symbolHash, uint256 offset, uint256 limit) external view returns (
+        uint256[] memory pricesE8,
+        uint256[] memory blocks
+    ) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256 len = s.priceHistoryE8.length;
+        if (offset >= len) return (new uint256[](0), new uint256[](0));
+        if (limit == 0 || offset + limit > len) limit = len - offset;
+        pricesE8 = new uint256[](limit);
+        blocks = new uint256[](limit);
+        for (uint256 i; i < limit; ) {
+            pricesE8[i] = s.priceHistoryE8[offset + i];
+            blocks[i] = s.blockHistory[offset + i];
+            unchecked { ++i; }
+        }
+    }
+
+    function getBandHistory(bytes32 symbolHash, uint256 offset, uint256 limit) external view returns (
+        uint8[] memory bands,
+        uint256[] memory blocks
+    ) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256[] storage blks = _bandHistoryBlocks[symbolHash];
+        uint8[] storage bnds = _bandHistoryValues[symbolHash];
+        uint256 len = blks.length;
+        if (offset >= len) return (new uint8[](0), new uint256[](0));
+        if (limit == 0 || offset + limit > len) limit = len - offset;
+        bands = new uint8[](limit);
+        blocks = new uint256[](limit);
+        for (uint256 i; i < limit; ) {
+            bands[i] = bnds[offset + i];
+            blocks[i] = blks[offset + i];
+            unchecked { ++i; }
+        }
+    }
+
+    function getRegisteredSymbols() external view returns (bytes32[] memory) {
+        return registeredSymbols;
+    }
+
+    function getHeatSummary() external view returns (
+        bytes32[] memory symbolHashes,
+        uint8[] memory bands,
+        uint256[] memory volatilitiesE8,
+        uint256[] memory pricesE8
+    ) {
+        uint256 n = registeredSymbols.length;
+        if (n == 0) revert THRM_NoThermometers();
+        symbolHashes = new bytes32[](n);
+        bands = new uint8[](n);
+        volatilitiesE8 = new uint256[](n);
+        pricesE8 = new uint256[](n);
+        for (uint256 i; i < n; ) {
+            bytes32 sh = registeredSymbols[i];
+            ThermoSlot storage s = thermometers[sh];
+            symbolHashes[i] = sh;
+            bands[i] = s.currentBand;
+            volatilitiesE8[i] = s.currentVolatilityE8;
+            pricesE8[i] = s.currentPriceE8;
+            unchecked { ++i; }
