@@ -678,3 +678,88 @@ contract Therminos {
         symbolHash = registeredSymbols[index];
         ThermoSlot storage s = thermometers[symbolHash];
         return (
+            symbolHash,
+            s.currentBand,
+            s.currentPriceE8,
+            s.currentVolatilityE8,
+            s.halted
+        );
+    }
+
+    function getSlotsCount() external view returns (uint256) {
+        return registeredSymbols.length;
+    }
+
+    function symbolHashFromString(string calldata symbol) external pure returns (bytes32) {
+        return keccak256(abi.encodePacked(symbol));
+    }
+
+    function isRegistered(bytes32 symbolHash) external view returns (bool) {
+        return thermometers[symbolHash].registeredAtBlock != 0;
+    }
+
+    function getTreasury() external view returns (address) {
+        return treasury;
+    }
+
+    function getUpdater() external view returns (address) {
+        return updater;
+    }
+
+    function getGuardian() external view returns (address) {
+        return guardian;
+    }
+
+    function getPaused() external view returns (bool) {
+        return platformPaused;
+    }
+
+    function getReportFeeWei() external view returns (uint256) {
+        return reportFeeWei;
+    }
+
+    function getMaxHistoryLength() external view returns (uint256) {
+        return maxHistoryLength;
+    }
+
+    function getWindowBlocks(bytes32 symbolHash) external view returns (uint256) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return thermometers[symbolHash].windowBlocks;
+    }
+
+    function getCooldownBlocks(bytes32 symbolHash) external view returns (uint256) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return thermometers[symbolHash].cooldownBlocks;
+    }
+
+    function getLastReportBlock(bytes32 symbolHash) external view returns (uint256) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return thermometers[symbolHash].lastReportBlock;
+    }
+
+    function getRegisteredAtBlock(bytes32 symbolHash) external view returns (uint256) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return thermometers[symbolHash].registeredAtBlock;
+    }
+
+    function getHistoryLength(bytes32 symbolHash) external view returns (uint256) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        return thermometers[symbolHash].priceHistoryE8.length;
+    }
+
+    function getBandHistoryLength(bytes32 symbolHash) external view returns (uint256) {
+        return _bandHistoryBlocks[symbolHash].length;
+    }
+
+    function multiGetCurrentBand(bytes32[] calldata symbolHashes) external view returns (uint8[] memory bands) {
+        bands = new uint8[](symbolHashes.length);
+        for (uint256 i; i < symbolHashes.length; ) {
+            if (thermometers[symbolHashes[i]].registeredAtBlock != 0) {
+                bands[i] = thermometers[symbolHashes[i]].currentBand;
+            } else {
+                bands[i] = 0;
+            }
+            unchecked { ++i; }
+        }
+    }
+
