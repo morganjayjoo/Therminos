@@ -1528,3 +1528,88 @@ contract Therminos {
         }
     }
 
+    function getMinVolatilityE8InWindow(bytes32 symbolHash) external view returns (uint256 minVolE8) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256 len = s.priceHistoryE8.length;
+        minVolE8 = type(uint256).max;
+        for (uint256 endIdx = 1; endIdx < len; ) {
+            uint256 sum;
+            uint256 count;
+            for (uint256 i = endIdx; i > 0; ) {
+                unchecked { --i; }
+                if (s.blockHistory[endIdx] - s.blockHistory[i] > s.windowBlocks) break;
+                uint256 pCur = s.priceHistoryE8[i];
+                uint256 pPrev = i == 0 ? pCur : s.priceHistoryE8[i - 1];
+                if (pPrev != 0 && i > 0) {
+                    uint256 ch = (pCur > pPrev) ? ((pCur - pPrev) * THRM_BPS_BASE) / pPrev : ((pPrev - pCur) * THRM_BPS_BASE) / pPrev;
+                    sum += ch;
+                    count++;
+                }
+            }
+            uint256 volBps = count == 0 ? 0 : sum / count;
+            uint256 volE8 = (volBps * 1e8) / THRM_BPS_BASE;
+            if (volE8 < minVolE8) minVolE8 = volE8;
+            unchecked { ++endIdx; }
+        }
+        if (minVolE8 == type(uint256).max) minVolE8 = 0;
+    }
+
+    function getSymbolsByVolatilityDesc() external view returns (bytes32[] memory symbolHashes, uint256[] memory volatilitiesE8) {
+        uint256 n = registeredSymbols.length;
+        if (n == 0) revert THRM_NoThermometers();
+        symbolHashes = new bytes32[](n);
+        volatilitiesE8 = new uint256[](n);
+        for (uint256 i; i < n; ) {
+            symbolHashes[i] = registeredSymbols[i];
+            volatilitiesE8[i] = thermometers[registeredSymbols[i]].currentVolatilityE8;
+            unchecked { ++i; }
+        }
+        for (uint256 i; i < n; ) {
+            for (uint256 j = i + 1; j < n; ) {
+                if (volatilitiesE8[j] > volatilitiesE8[i]) {
+                    bytes32 tSym = symbolHashes[i];
+                    symbolHashes[i] = symbolHashes[j];
+                    symbolHashes[j] = tSym;
+                    uint256 tVol = volatilitiesE8[i];
+                    volatilitiesE8[i] = volatilitiesE8[j];
+                    volatilitiesE8[j] = tVol;
+                }
+                unchecked { ++j; }
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function getSymbolsByBandAsc() external view returns (bytes32[] memory symbolHashes, uint8[] memory bands) {
+        uint256 n = registeredSymbols.length;
+        if (n == 0) revert THRM_NoThermometers();
+        symbolHashes = new bytes32[](n);
+        bands = new uint8[](n);
+        for (uint256 i; i < n; ) {
+            symbolHashes[i] = registeredSymbols[i];
+            bands[i] = thermometers[registeredSymbols[i]].currentBand;
+            unchecked { ++i; }
+        }
+        for (uint256 i; i < n; ) {
+            for (uint256 j = i + 1; j < n; ) {
+                if (bands[j] < bands[i] || (bands[j] == bands[i] && symbolHashes[j] < symbolHashes[i])) {
+                    bytes32 tSym = symbolHashes[i];
+                    symbolHashes[i] = symbolHashes[j];
+                    symbolHashes[j] = tSym;
+                    uint8 tBand = bands[i];
+                    bands[i] = bands[j];
+                    bands[j] = tBand;
+                }
+                unchecked { ++j; }
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function getBlocksSinceFirstReport(bytes32 symbolHash) external view returns (uint256) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        if (s.blockHistory.length == 0) return 0;
+        return block.number - s.blockHistory[0];
+    }
