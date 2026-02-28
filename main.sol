@@ -1358,3 +1358,88 @@ contract Therminos {
         return false;
     }
 
+    function getHaltedSymbols() external view returns (bytes32[] memory) {
+        uint256 count;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            if (thermometers[registeredSymbols[i]].halted) count++;
+            unchecked { ++i; }
+        }
+        bytes32[] memory out = new bytes32[](count);
+        count = 0;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            if (thermometers[registeredSymbols[i]].halted) {
+                out[count] = registeredSymbols[i];
+                count++;
+            }
+            unchecked { ++i; }
+        }
+        return out;
+    }
+
+    function getHotOrCriticalSymbols() external view returns (bytes32[] memory) {
+        uint256 count;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            if (thermometers[registeredSymbols[i]].currentBand >= THRM_BAND_HOT) count++;
+            unchecked { ++i; }
+        }
+        bytes32[] memory out = new bytes32[](count);
+        count = 0;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            if (thermometers[registeredSymbols[i]].currentBand >= THRM_BAND_HOT) {
+                out[count] = registeredSymbols[i];
+                count++;
+            }
+            unchecked { ++i; }
+        }
+        return out;
+    }
+
+    function getStaleSymbols(uint256 maxBlocksSinceReport) external view returns (bytes32[] memory) {
+        uint256 count;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            ThermoSlot storage s = thermometers[registeredSymbols[i]];
+            if (s.lastReportBlock != 0 && block.number - s.lastReportBlock > maxBlocksSinceReport) count++;
+            unchecked { ++i; }
+        }
+        bytes32[] memory out = new bytes32[](count);
+        count = 0;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            ThermoSlot storage s = thermometers[registeredSymbols[i]];
+            if (s.lastReportBlock != 0 && block.number - s.lastReportBlock > maxBlocksSinceReport) {
+                out[count] = registeredSymbols[i];
+                count++;
+            }
+            unchecked { ++i; }
+        }
+        return out;
+    }
+
+    function getConfigSnapshot() external view returns (
+        address ownerAddr,
+        address treasuryAddr,
+        address guardianAddr,
+        address updaterAddr,
+        uint256 deployBlk,
+        uint256 coldBpsVal,
+        uint256 mildBpsVal,
+        uint256 warmBpsVal,
+        uint256 hotBpsVal,
+        uint256 reportFee,
+        uint256 maxHistLen,
+        bool paused
+    ) {
+        return (
+            owner,
+            treasury,
+            guardian,
+            updater,
+            deployBlock,
+            coldBps,
+            mildBps,
+            warmBps,
+            hotBps,
+            reportFeeWei,
+            maxHistoryLength,
+            platformPaused
+        );
+    }
