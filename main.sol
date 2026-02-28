@@ -1698,3 +1698,75 @@ contract Therminos {
     }
 
     function getMultiSummary(bytes32[] calldata symbolHashes) external view returns (
+        uint256[] memory pricesE8,
+        uint256[] memory volatilitiesE8,
+        uint8[] memory bands,
+        bool[] memory haltedFlags,
+        uint256[] memory lastReportBlocks
+    ) {
+        uint256 n = symbolHashes.length;
+        pricesE8 = new uint256[](n);
+        volatilitiesE8 = new uint256[](n);
+        bands = new uint8[](n);
+        haltedFlags = new bool[](n);
+        lastReportBlocks = new uint256[](n);
+        for (uint256 i; i < n; ) {
+            ThermoSlot storage s = thermometers[symbolHashes[i]];
+            if (s.registeredAtBlock != 0) {
+                pricesE8[i] = s.currentPriceE8;
+                volatilitiesE8[i] = s.currentVolatilityE8;
+                bands[i] = s.currentBand;
+                haltedFlags[i] = s.halted;
+                lastReportBlocks[i] = s.lastReportBlock;
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function getDomainSaltHex() external pure returns (bytes32) {
+        return bytes32(THRM_DOMAIN_SALT);
+    }
+
+    function getBandUpperBoundBps(uint8 band) external view returns (uint256 bps) {
+        if (band == THRM_BAND_COLD) return coldBps;
+        if (band == THRM_BAND_MILD) return mildBps;
+        if (band == THRM_BAND_WARM) return warmBps;
+        if (band == THRM_BAND_HOT) return hotBps;
+        if (band == THRM_BAND_CRITICAL) return THRM_BPS_BASE;
+        revert THRM_InvalidBand();
+    }
+
+    function getBandLowerBoundBps(uint8 band) external view returns (uint256 bps) {
+        if (band == THRM_BAND_COLD) return 0;
+        if (band == THRM_BAND_MILD) return coldBps;
+        if (band == THRM_BAND_WARM) return mildBps;
+        if (band == THRM_BAND_HOT) return warmBps;
+        if (band == THRM_BAND_CRITICAL) return hotBps;
+        revert THRM_InvalidBand();
+    }
+
+    function getVolatilityBandBounds() external view returns (
+        uint256 coldUpper,
+        uint256 mildUpper,
+        uint256 warmUpper,
+        uint256 hotUpper
+    ) {
+        return (coldBps, mildBps, warmBps, hotBps);
+    }
+
+    function getContractInfo() external view returns (
+        bytes32 genesis,
+        uint256 deployBlk,
+        uint256 chainId,
+        uint256 thermoCount,
+        uint256 totalReports
+    ) {
+        uint256 total;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            total += thermometers[registeredSymbols[i]].priceHistoryE8.length;
+            unchecked { ++i; }
+        }
+        return (genesisHash, deployBlock, block.chainid, thermometerCount, total);
+    }
+}
+
