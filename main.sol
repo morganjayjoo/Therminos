@@ -1443,3 +1443,88 @@ contract Therminos {
             platformPaused
         );
     }
+
+    function getPriceSpreadE8(bytes32 symbolHash) external view returns (uint256 spreadE8) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        (uint256 minP,) = getMinPriceInWindow(symbolHash);
+        (uint256 maxP,) = getMaxPriceInWindow(symbolHash);
+        if (minP == 0 && maxP == 0) return 0;
+        if (minP == 0) return maxP;
+        return maxP - minP;
+    }
+
+    function getPriceSpreadBps(bytes32 symbolHash) external view returns (uint256 spreadBps) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        (uint256 minP,) = getMinPriceInWindow(symbolHash);
+        (uint256 maxP,) = getMaxPriceInWindow(symbolHash);
+        if (minP == 0 || maxP == 0) return 0;
+        return ((maxP - minP) * THRM_BPS_BASE) / minP;
+    }
+
+    function getNthPrice(bytes32 symbolHash, uint256 n) external view returns (uint256 priceE8, uint256 blockNum) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256 len = s.priceHistoryE8.length;
+        if (n >= len) revert THRM_InvalidIndex();
+        return (s.priceHistoryE8[n], s.blockHistory[n]);
+    }
+
+    function getNthBand(bytes32 symbolHash, uint256 n) external view returns (uint8 band, uint256 blockNum) {
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256 len = _bandHistoryBlocks[symbolHash].length;
+        if (n >= len) revert THRM_InvalidIndex();
+        return (_bandHistoryValues[symbolHash][n], _bandHistoryBlocks[symbolHash][n]);
+    }
+
+    function getTimeInCurrentBand(bytes32 symbolHash) external view returns (uint256 blocksInCurrentBand) {
+        uint256[] storage blks = _bandHistoryBlocks[symbolHash];
+        if (blks.length == 0) return 0;
+        return block.number - blks[blks.length - 1];
+    }
+
+    function getPreviousBand(bytes32 symbolHash) external view returns (uint8 band, bool hasPrevious) {
+        uint8[] storage bnds = _bandHistoryValues[symbolHash];
+        if (bnds.length < 2) return (0, false);
+        return (bnds[bnds.length - 2], true);
+    }
+
+    function getBandChangeCount(bytes32 symbolHash) external view returns (uint256) {
+        uint8[] storage bnds = _bandHistoryValues[symbolHash];
+        if (bnds.length < 2) return 0;
+        uint256 count;
+        for (uint256 i = 1; i < bnds.length; ) {
+            if (bnds[i] != bnds[i - 1]) count++;
+            unchecked { ++i; }
+        }
+        return count;
+    }
+
+    function getMaxVolatilityE8Seen(bytes32 symbolHash) external view returns (uint256 maxVolE8) {
+        uint8[] storage bnds = _bandHistoryValues[symbolHash];
+        uint256[] storage blks = _bandHistoryBlocks[symbolHash];
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        ThermoSlot storage s = thermometers[symbolHash];
+        uint256 len = s.priceHistoryE8.length;
+        for (uint256 endIdx = 1; endIdx < len; ) {
+            uint256 sum;
+            uint256 count;
+            for (uint256 i = endIdx; i > 0; ) {
+                unchecked { --i; }
+                if (s.blockHistory[endIdx] - s.blockHistory[i] > s.windowBlocks) break;
+                uint256 pCur = s.priceHistoryE8[i];
+                uint256 pPrev = i == 0 ? pCur : s.priceHistoryE8[i - 1];
+                if (pPrev != 0 && i > 0) {
+                    uint256 ch = (pCur > pPrev) ? ((pCur - pPrev) * THRM_BPS_BASE) / pPrev : ((pPrev - pCur) * THRM_BPS_BASE) / pPrev;
+                    sum += ch;
+                    count++;
+                }
+            }
+            uint256 volBps = count == 0 ? 0 : sum / count;
+            uint256 volE8 = (volBps * 1e8) / THRM_BPS_BASE;
+            if (volE8 > maxVolE8) maxVolE8 = volE8;
+            unchecked { ++endIdx; }
+        }
+    }
+
