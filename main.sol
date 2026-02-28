@@ -1273,3 +1273,88 @@ contract Therminos {
     }
 
     function getTreasuryBalance() external view returns (uint256) {
+        return treasury.balance;
+    }
+
+    function getChainId() external view returns (uint256) {
+        return block.chainid;
+    }
+
+    function getBlockNumber() external view returns (uint256) {
+        return block.number;
+    }
+
+    function getTimestamp() external view returns (uint256) {
+        return block.timestamp;
+    }
+
+    function getVersionDomain() external pure returns (bytes32) {
+        return THRM_GENESIS_DOMAIN;
+    }
+
+    function getConstants() external pure returns (
+        uint256 bpsBase,
+        uint256 maxThermometers,
+        uint256 minWindowBlocks,
+        uint256 maxWindowBlocks,
+        uint256 maxHistoryLen,
+        uint256 maxBatchReport
+    ) {
+        return (
+            THRM_BPS_BASE,
+            THRM_MAX_THERMOMETERS,
+            THRM_MIN_WINDOW_BLOCKS,
+            THRM_MAX_WINDOW_BLOCKS,
+            THRM_MAX_HISTORY_LEN,
+            THRM_MAX_BATCH_REPORT
+        );
+    }
+
+    function getBandNames() external pure returns (
+        string memory coldName,
+        string memory mildName,
+        string memory warmName,
+        string memory hotName,
+        string memory criticalName
+    ) {
+        return ("cold", "mild", "warm", "hot", "critical");
+    }
+
+    function getAggregateVolatilityE8() external view returns (uint256) {
+        if (registeredSymbols.length == 0) revert THRM_NoThermometers();
+        uint256 sum;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            sum += thermometers[registeredSymbols[i]].currentVolatilityE8;
+            unchecked { ++i; }
+        }
+        return sum / registeredSymbols.length;
+    }
+
+    function getAggregatePriceE8() external view returns (uint256) {
+        if (registeredSymbols.length == 0) revert THRM_NoThermometers();
+        uint256 sum;
+        uint256 count;
+        for (uint256 i; i < registeredSymbols.length; ) {
+            uint256 p = thermometers[registeredSymbols[i]].currentPriceE8;
+            if (p > 0) { sum += p; count++; }
+            unchecked { ++i; }
+        }
+        return count == 0 ? 0 : sum / count;
+    }
+
+    function hasAnyHotOrCritical() external view returns (bool) {
+        for (uint256 i; i < registeredSymbols.length; ) {
+            if (thermometers[registeredSymbols[i]].currentBand >= THRM_BAND_HOT) return true;
+            unchecked { ++i; }
+        }
+        return false;
+    }
+
+    function hasAnyHalted() external view returns (bool) {
+        for (uint256 i; i < registeredSymbols.length; ) {
+            if (thermometers[registeredSymbols[i]].halted) return true;
+            unchecked { ++i; }
+        }
+        return false;
+    }
+
