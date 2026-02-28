@@ -1613,3 +1613,88 @@ contract Therminos {
         if (s.blockHistory.length == 0) return 0;
         return block.number - s.blockHistory[0];
     }
+
+    function getBlocksSinceLastReport(bytes32 symbolHash) external view returns (uint256) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        if (s.lastReportBlock == 0) return type(uint256).max;
+        return block.number - s.lastReportBlock;
+    }
+
+    function isStale(bytes32 symbolHash, uint256 maxBlocks) external view returns (bool) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        if (s.lastReportBlock == 0) return true;
+        return block.number - s.lastReportBlock > maxBlocks;
+    }
+
+    function getReportFrequencyEstimate(bytes32 symbolHash) external view returns (uint256 avgBlocksBetweenReports) {
+        uint256[] storage blks = thermometers[symbolHash].blockHistory;
+        if (thermometers[symbolHash].registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        if (blks.length < 2) return 0;
+        uint256 totalGap;
+        for (uint256 i = 1; i < blks.length; ) {
+            totalGap += blks[i] - blks[i - 1];
+            unchecked { ++i; }
+        }
+        return totalGap / (blks.length - 1);
+    }
+
+    function getPercentilePriceE8(bytes32 symbolHash, uint256 percentileBps) external view returns (uint256 priceE8) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        uint256 len = s.priceHistoryE8.length;
+        if (len == 0) return 0;
+        if (percentileBps > THRM_BPS_BASE) percentileBps = THRM_BPS_BASE;
+        uint256[] memory copy = new uint256[](len);
+        for (uint256 i; i < len; ) {
+            copy[i] = s.priceHistoryE8[i];
+            unchecked { ++i; }
+        }
+        for (uint256 i; i < len; ) {
+            for (uint256 j = i + 1; j < len; ) {
+                if (copy[j] < copy[i]) {
+                    uint256 t = copy[i];
+                    copy[i] = copy[j];
+                    copy[j] = t;
+                }
+                unchecked { ++j; }
+            }
+            unchecked { ++i; }
+        }
+        uint256 idx = (len * percentileBps) / THRM_BPS_BASE;
+        if (idx >= len) idx = len - 1;
+        return copy[idx];
+    }
+
+    function getMedianPriceE8(bytes32 symbolHash) external view returns (uint256) {
+        return getPercentilePriceE8(symbolHash, 5000);
+    }
+
+    function getSummaryForSymbol(bytes32 symbolHash) external view returns (
+        uint256 currentPriceE8,
+        uint256 currentVolatilityE8,
+        uint8 currentBand,
+        uint256 minPriceE8,
+        uint256 maxPriceE8,
+        uint256 historyLength,
+        bool halted,
+        uint256 lastReportBlock
+    ) {
+        ThermoSlot storage s = thermometers[symbolHash];
+        if (s.registeredAtBlock == 0) revert THRM_SymbolNotFound();
+        (uint256 minP,) = getMinPriceInWindow(symbolHash);
+        (uint256 maxP,) = getMaxPriceInWindow(symbolHash);
+        return (
+            s.currentPriceE8,
+            s.currentVolatilityE8,
+            s.currentBand,
+            minP,
+            maxP,
+            s.priceHistoryE8.length,
+            s.halted,
+            s.lastReportBlock
+        );
+    }
+
+    function getMultiSummary(bytes32[] calldata symbolHashes) external view returns (
